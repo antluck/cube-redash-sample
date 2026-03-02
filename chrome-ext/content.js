@@ -85,8 +85,9 @@
     btn.addEventListener('click', () => panel.classList.toggle('open'));
     panel.querySelector('.cu-close').addEventListener('click', () => panel.classList.remove('open'));
 
-    // Draggable panel
+    // Draggable panel & button
     makeDraggable(panel, panel.querySelector('.cu-header'));
+    makeDraggable(btn, btn);
 
     // Position near query editor on first open
     let positioned = false;
@@ -132,8 +133,8 @@
   // ── Redash Interaction ──────────────────────────────────────────
 
   function getRedashSQL() {
-    const aceEditor = document.querySelector('.ace_editor');
-    if (aceEditor && aceEditor.env && aceEditor.env.editor) return aceEditor.env.editor.getValue();
+    const editor = getAceEditorInstance();
+    if (editor && typeof editor.getValue === 'function') return editor.getValue();
     const aceLines = document.querySelectorAll('.ace_line');
     if (aceLines.length > 0) return Array.from(aceLines).map(l => l.textContent).join('\n');
     const queryText = document.querySelector('.query-editor-text');
@@ -141,13 +142,50 @@
     return null;
   }
 
+  function getAceEditorInstance() {
+    const el = document.querySelector('.ace_editor');
+    if (!el) return null;
+
+    // Standard Ace: element.env.editor
+    if (el.env && el.env.editor) return el.env.editor;
+
+    // Global ace.edit() returns existing instance for already-initialized elements
+    if (typeof ace !== 'undefined' && ace.edit) {
+      try { return ace.edit(el); } catch (_) {}
+    }
+
+    // React-ace stores the editor on a React fiber; walk __reactInternalInstance / __reactFiber
+    const fiberKey = Object.keys(el).find(k => k.startsWith('__reactFiber$') || k.startsWith('__reactInternalInstance$'));
+    if (fiberKey) {
+      let fiber = el[fiberKey];
+      for (let i = 0; i < 15 && fiber; i++) {
+        const ref = fiber.stateNode;
+        if (ref && typeof ref.getValue === 'function' && typeof ref.setValue === 'function') return ref;
+        if (ref && ref.editor && typeof ref.editor.setValue === 'function') return ref.editor;
+        fiber = fiber.return;
+      }
+    }
+
+    return null;
+  }
+
   function setRedashSQL(sql) {
-    const aceEditor = document.querySelector('.ace_editor');
-    if (aceEditor && aceEditor.env && aceEditor.env.editor) {
-      aceEditor.env.editor.setValue(sql, -1);
-      aceEditor.env.editor.clearSelection();
+    const editor = getAceEditorInstance();
+    if (editor) {
+      editor.setValue(sql, -1);
+      if (typeof editor.clearSelection === 'function') editor.clearSelection();
       return true;
     }
+
+    // Fallback: write directly to the hidden textarea Ace uses for input
+    const textarea = document.querySelector('.ace_editor textarea.ace_text-input');
+    if (textarea) {
+      textarea.focus();
+      document.execCommand('selectAll');
+      document.execCommand('insertText', false, sql);
+      return true;
+    }
+
     return false;
   }
 
@@ -166,7 +204,7 @@
     const bodyRows = container.querySelectorAll('.ant-table-tbody tr.ant-table-row');
     if (!bodyRows.length) return null;
     const rows = [];
-    for (let i = 0; i < Math.min(bodyRows.length, 200); i++) {
+    for (let i = 0; i < Math.min(bodyRows.length, 500); i++) {
       const cells = bodyRows[i].querySelectorAll('td.ant-table-cell');
       const row = {};
       cells.forEach((cell, j) => {
@@ -574,14 +612,15 @@
   // ── Draggable ─────────────────────────────────────────────────────
 
   function makeDraggable(el, handle) {
-    let dragging = false, startX, startY, origX, origY;
+    let dragging = false, didMove = false, startX, startY, origX, origY;
+    const DRAG_THRESHOLD = 4;
 
     handle.style.cursor = 'grab';
 
     handle.addEventListener('mousedown', (e) => {
-      // Don't drag when clicking buttons/tabs inside header
-      if (e.target.closest('button')) return;
+      if (handle !== el && e.target.closest('button')) return;
       dragging = true;
+      didMove = false;
       handle.style.cursor = 'grabbing';
       const rect = el.getBoundingClientRect();
       startX = e.clientX;
@@ -595,6 +634,8 @@
       if (!dragging) return;
       const dx = e.clientX - startX;
       const dy = e.clientY - startY;
+      if (!didMove && Math.abs(dx) < DRAG_THRESHOLD && Math.abs(dy) < DRAG_THRESHOLD) return;
+      didMove = true;
       el.style.left = Math.max(0, origX + dx) + 'px';
       el.style.top = Math.max(0, origY + dy) + 'px';
       el.style.bottom = 'auto';
@@ -607,6 +648,14 @@
         handle.style.cursor = 'grab';
       }
     });
+
+    handle.addEventListener('click', (e) => {
+      if (didMove) {
+        e.stopImmediatePropagation();
+        e.preventDefault();
+        didMove = false;
+      }
+    }, true);
   }
 
   // ── Helpers ───────────────────────────────────────────────────────

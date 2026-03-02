@@ -1,0 +1,20 @@
+version: 2
+
+models:
+  - name: mart_user_stats
+    description: "Per-user rating statistics"
+    columns:
+      - name: user_id
+        tests: [not_null, unique]
+
+  - name: mart_movie_stats
+    description: "Per-movie rating statistics with metadata"
+    columns:
+      - name: movie_id
+        tests: [not_null, unique]
+
+  - name: mart_genre_stats
+    description: "Per-genre aggregated statistics"
+    columns:
+      - name: genre
+        tests: [not_null, unique]

@@ -1,0 +1,24 @@
+# Data
+data/
+*.duckdb
+*.duckdb.wal
+
+# Node
+cube/node_modules/
+cube/.cubestore/
+
+# dbt
+dbt_project/target/
+dbt_project/logs/
+dbt_project/dbt_packages/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# Environment
+.env
+
+# OS
+.DS_Store

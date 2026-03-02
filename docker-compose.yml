@@ -1,0 +1,119 @@
+x-redash-env: &redash-env
+  REDASH_DATABASE_URL: postgresql://redash:redash@redash-postgres/redash
+  REDASH_REDIS_URL: redis://redash-redis:6379/0
+  REDASH_SECRET_KEY: redash-local-dev-secret
+  REDASH_COOKIE_SECRET: redash-local-cookie-secret
+
+services:
+  # ── Data Init (runs once, then exits) ─────────────────────
+  init:
+    build: ./init
+    volumes:
+      - duckdb-data:/data
+      - ./scripts:/app/scripts:ro
+      - ./dbt_project:/app/dbt_project
+    environment:
+      DUCKDB_PATH: /data/analytics.duckdb
+      MOVIELENS_RAW_DIR: /data/raw/ml-latest-small
+
+  # ── Cube.js Semantic Layer ────────────────────────────────
+  cube:
+    build: ./cube
+    ports:
+      - "4000:4000"
+    volumes:
+      - duckdb-data:/data:ro
+    environment:
+      CUBEJS_DB_TYPE: duckdb
+      CUBEJS_DB_DUCKDB_DATABASE_PATH: /data/analytics.duckdb
+      CUBEJS_DEV_MODE: "true"
+      CUBEJS_API_SECRET: cube-analytics-dev
+      CUBEJS_EXTERNAL_DEFAULT: "false"
+    depends_on:
+      init:
+        condition: service_completed_successfully
+
+  # ── DuckDB PostgreSQL Wire Server ─────────────────────────
+  duckdb-server:
+    build: ./duckdb-server
+    ports:
+      - "5433:5433"
+    volumes:
+      - duckdb-data:/data:ro
+    environment:
+      DUCKDB_PATH: /data/analytics.duckdb
+      HOST: "0.0.0.0"
+      PORT: "5433"
+    depends_on:
+      init:
+        condition: service_completed_successfully
+
+  # ── AI BI Consultant (FastAPI + Claude) ───────────────────
+  ai-consultant:
+    build: ./ai-consultant
+    ports:
+      - "8787:8787"
+    environment:
+      CUBE_API_URL: http://cube:4000/cubejs-api/v1
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+    depends_on:
+      - cube
+
+  # ── BI Dashboard (static HTML) ───────────────────────────
+  bi:
+    image: nginx:alpine
+    ports:
+      - "8080:80"
+    volumes:
+      - ./bi:/usr/share/nginx/html:ro
+    depends_on:
+      - cube
+
+  # ── Redash (profile: redash) ─────────────────────────────
+  redash-redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    profiles: [redash]
+
+  redash-postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_DB: redash
+      POSTGRES_USER: redash
+      POSTGRES_PASSWORD: redash
+    volumes:
+      - redash-pg:/var/lib/postgresql/data
+    restart: unless-stopped
+    profiles: [redash]
+
+  redash:
+    image: redash/redash:25.1.0
+    depends_on: [redash-redis, redash-postgres]
+    ports:
+      - "5050:5000"
+    environment:
+      <<: *redash-env
+    restart: unless-stopped
+    profiles: [redash]
+
+  redash-worker:
+    image: redash/redash:25.1.0
+    depends_on: [redash-redis, redash-postgres]
+    command: worker
+    environment:
+      <<: *redash-env
+    restart: unless-stopped
+    profiles: [redash]
+
+  redash-scheduler:
+    image: redash/redash:25.1.0
+    depends_on: [redash-redis, redash-postgres]
+    command: scheduler
+    environment:
+      <<: *redash-env
+    restart: unless-stopped
+    profiles: [redash]
+
+volumes:
+  duckdb-data:
+  redash-pg:

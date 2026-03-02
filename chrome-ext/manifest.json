@@ -1,0 +1,22 @@
+{
+  "manifest_version": 3,
+  "name": "Cube Tools",
+  "version": "2.0.0",
+  "description": "NL→SQL, AI analysis, and DuckDB SQL inspection for Redash + Cube.js",
+  "permissions": ["activeTab"],
+  "host_permissions": [
+    "http://localhost:4000/*",
+    "http://localhost:5050/*",
+    "http://localhost:8787/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": ["http://localhost:5050/*"],
+      "js": ["chart.min.js", "content.js"],
+      "css": ["panel.css"]
+    }
+  ],
+  "icons": {
+    "48": "icon48.png"
+  }
+}

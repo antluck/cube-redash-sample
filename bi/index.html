@@ -1,0 +1,515 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MovieLens BI Dashboard</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+<style>
+  :root {
+    --bg: #0f172a; --surface: #1e293b; --border: #334155;
+    --text: #e2e8f0; --muted: #94a3b8; --accent: #38bdf8;
+    --green: #4ade80; --amber: #fbbf24; --rose: #fb7185;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, 'Segoe UI', sans-serif; background: var(--bg); color: var(--text); }
+
+  header {
+    background: var(--surface); border-bottom: 1px solid var(--border);
+    padding: 16px 24px; display: flex; align-items: center; gap: 16px;
+  }
+  header h1 { font-size: 20px; font-weight: 600; }
+  header .badge {
+    font-size: 11px; background: var(--accent); color: var(--bg);
+    padding: 2px 8px; border-radius: 10px; font-weight: 600;
+  }
+  header .status { margin-left: auto; font-size: 13px; color: var(--muted); }
+  header .status.ok::before { content: ''; display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--green); margin-right: 6px; }
+  header .status.err::before { content: ''; display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--rose); margin-right: 6px; }
+
+  nav {
+    background: var(--surface); border-bottom: 1px solid var(--border);
+    padding: 0 24px; display: flex; gap: 0;
+  }
+  nav button {
+    background: none; border: none; color: var(--muted); padding: 12px 20px;
+    font-size: 14px; cursor: pointer; border-bottom: 2px solid transparent;
+    transition: all 0.2s;
+  }
+  nav button:hover { color: var(--text); }
+  nav button.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+  main { padding: 24px; max-width: 1400px; margin: 0 auto; }
+
+  .grid { display: grid; gap: 20px; }
+  .grid-2 { grid-template-columns: 1fr 1fr; }
+  .grid-3 { grid-template-columns: 1fr 1fr 1fr; }
+  @media (max-width: 900px) { .grid-2, .grid-3 { grid-template-columns: 1fr; } }
+
+  .card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 12px; padding: 20px;
+  }
+  .card h3 { font-size: 14px; color: var(--muted); margin-bottom: 12px; font-weight: 500; }
+  .card .chart-wrap { position: relative; height: 300px; }
+
+  .kpi-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 20px; }
+  @media (max-width: 900px) { .kpi-row { grid-template-columns: repeat(2, 1fr); } }
+  .kpi {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 12px; padding: 16px 20px;
+  }
+  .kpi .label { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; }
+  .kpi .value { font-size: 28px; font-weight: 700; margin-top: 4px; }
+  .kpi .sub { font-size: 12px; color: var(--muted); margin-top: 2px; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th { text-align: left; color: var(--muted); font-weight: 500; padding: 8px 12px; border-bottom: 1px solid var(--border); }
+  td { padding: 8px 12px; border-bottom: 1px solid var(--border); }
+  tr:hover td { background: rgba(56, 189, 248, 0.05); }
+  .rating-bar { display: inline-block; height: 6px; border-radius: 3px; background: var(--accent); vertical-align: middle; }
+
+  .hidden { display: none; }
+  .loading { text-align: center; color: var(--muted); padding: 40px; }
+
+  .filter-bar { display: flex; gap: 12px; margin-bottom: 16px; align-items: center; }
+  .filter-bar label { font-size: 13px; color: var(--muted); }
+  .filter-bar select, .filter-bar input {
+    background: var(--bg); border: 1px solid var(--border); color: var(--text);
+    padding: 6px 10px; border-radius: 6px; font-size: 13px;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>MovieLens BI</h1>
+  <span class="badge">Cube.js</span>
+  <span id="conn-status" class="status">Connecting...</span>
+</header>
+
+<nav>
+  <button class="active" data-tab="overview">Overview</button>
+  <button data-tab="genres">Genres</button>
+  <button data-tab="movies">Movies</button>
+  <button data-tab="users">Users</button>
+</nav>
+
+<main>
+  <!-- Overview -->
+  <section id="tab-overview">
+    <div class="kpi-row" id="kpi-cards"><div class="loading">Loading...</div></div>
+    <div class="grid grid-2">
+      <div class="card">
+        <h3>Ratings by Genre (Top 10)</h3>
+        <div class="chart-wrap"><canvas id="chart-genre-bar"></canvas></div>
+      </div>
+      <div class="card">
+        <h3>Genre Rating Distribution</h3>
+        <div class="chart-wrap"><canvas id="chart-genre-scatter"></canvas></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Genres -->
+  <section id="tab-genres" class="hidden">
+    <div class="grid grid-2">
+      <div class="card">
+        <h3>Movies per Genre</h3>
+        <div class="chart-wrap"><canvas id="chart-genre-movies"></canvas></div>
+      </div>
+      <div class="card">
+        <h3>Avg Rating by Genre</h3>
+        <div class="chart-wrap"><canvas id="chart-genre-avg"></canvas></div>
+      </div>
+    </div>
+    <div class="card" style="margin-top:20px">
+      <h3>Genre Detail Table</h3>
+      <div id="genre-table"></div>
+    </div>
+  </section>
+
+  <!-- Movies -->
+  <section id="tab-movies" class="hidden">
+    <div class="filter-bar">
+      <label>Sort by</label>
+      <select id="movie-sort">
+        <option value="totalRatings">Most Rated</option>
+        <option value="avgRating">Highest Rated</option>
+      </select>
+      <label>Min ratings</label>
+      <input type="number" id="movie-min-ratings" value="50" min="1" max="1000" style="width:80px">
+      <button onclick="loadMovies()" style="background:var(--accent);color:var(--bg);border:none;padding:6px 16px;border-radius:6px;cursor:pointer;font-size:13px">Apply</button>
+    </div>
+    <div class="grid grid-2">
+      <div class="card">
+        <h3>Top Movies</h3>
+        <div class="chart-wrap"><canvas id="chart-movie-bar"></canvas></div>
+      </div>
+      <div class="card">
+        <h3>Rating vs Popularity</h3>
+        <div class="chart-wrap"><canvas id="chart-movie-scatter"></canvas></div>
+      </div>
+    </div>
+    <div class="card" style="margin-top:20px">
+      <h3>Movie Rankings</h3>
+      <div id="movie-table"></div>
+    </div>
+  </section>
+
+  <!-- Users -->
+  <section id="tab-users" class="hidden">
+    <div class="grid grid-2">
+      <div class="card">
+        <h3>User Activity Distribution</h3>
+        <div class="chart-wrap"><canvas id="chart-user-hist"></canvas></div>
+      </div>
+      <div class="card">
+        <h3>Rating Tendency (avg rating vs count)</h3>
+        <div class="chart-wrap"><canvas id="chart-user-scatter"></canvas></div>
+      </div>
+    </div>
+    <div class="card" style="margin-top:20px">
+      <h3>Most Active Users (Top 30)</h3>
+      <div id="user-table"></div>
+    </div>
+  </section>
+</main>
+
+<script>
+const API = 'http://localhost:4000/cubejs-api/v1';
+const charts = {};
+
+// ── Cube.js query helper ──────────────────────────────────────────────
+async function cubeQuery(query) {
+  const res = await fetch(`${API}/load?query=${encodeURIComponent(JSON.stringify(query))}`);
+  if (!res.ok) throw new Error(`API ${res.status}`);
+  const json = await res.json();
+  return json.data || [];
+}
+
+// ── Tab navigation ────────────────────────────────────────────────────
+document.querySelectorAll('nav button').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('nav button').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    document.querySelectorAll('main > section').forEach(s => s.classList.add('hidden'));
+    document.getElementById(`tab-${btn.dataset.tab}`).classList.remove('hidden');
+    // Resize charts on tab switch
+    setTimeout(() => Object.values(charts).forEach(c => c.resize()), 50);
+  });
+});
+
+// ── Chart defaults ────────────────────────────────────────────────────
+Chart.defaults.color = '#94a3b8';
+Chart.defaults.borderColor = '#334155';
+Chart.defaults.font.family = '-apple-system, sans-serif';
+
+const COLORS = ['#38bdf8','#4ade80','#fbbf24','#fb7185','#a78bfa','#f472b6','#34d399','#f97316','#60a5fa','#e879f9',
+                '#2dd4bf','#facc15','#818cf8','#fb923c','#a3e635','#c084fc','#22d3ee','#f87171','#86efac','#fcd34d'];
+
+function makeChart(id, config) {
+  if (charts[id]) charts[id].destroy();
+  charts[id] = new Chart(document.getElementById(id), config);
+  return charts[id];
+}
+
+// ── Overview ──────────────────────────────────────────────────────────
+async function loadOverview() {
+  // KPIs
+  const [genres, movies, users] = await Promise.all([
+    cubeQuery({ measures: ['GenreStats.count', 'GenreStats.totalRatings'] }),
+    cubeQuery({ measures: ['MovieStats.count'] }),
+    cubeQuery({ measures: ['UserStats.count', 'UserStats.totalRatings'] }),
+  ]);
+
+  const g = genres[0] || {};
+  const m = movies[0] || {};
+  const u = users[0] || {};
+  document.getElementById('kpi-cards').innerHTML = `
+    <div class="kpi"><div class="label">Total Ratings</div><div class="value">${Number(u['UserStats.totalRatings'] || 0).toLocaleString()}</div><div class="sub">across all users</div></div>
+    <div class="kpi"><div class="label">Movies</div><div class="value">${Number(m['MovieStats.count'] || 0).toLocaleString()}</div><div class="sub">unique titles</div></div>
+    <div class="kpi"><div class="label">Users</div><div class="value">${Number(u['UserStats.count'] || 0).toLocaleString()}</div><div class="sub">active raters</div></div>
+    <div class="kpi"><div class="label">Genres</div><div class="value">${Number(g['GenreStats.count'] || 0)}</div><div class="sub">categories</div></div>
+  `;
+
+  // Genre bar chart
+  const genreData = await cubeQuery({
+    measures: ['GenreStats.totalRatings'],
+    dimensions: ['GenreStats.genre'],
+    order: { 'GenreStats.totalRatings': 'desc' },
+    limit: 10,
+  });
+
+  makeChart('chart-genre-bar', {
+    type: 'bar',
+    data: {
+      labels: genreData.map(d => d['GenreStats.genre']),
+      datasets: [{
+        label: 'Total Ratings',
+        data: genreData.map(d => +d['GenreStats.totalRatings']),
+        backgroundColor: COLORS.slice(0, 10).map(c => c + '99'),
+        borderColor: COLORS.slice(0, 10),
+        borderWidth: 1, borderRadius: 4,
+      }],
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: { x: { grid: { display: false } } },
+    },
+  });
+
+  // Scatter: avg rating vs total ratings by genre
+  const genreScatter = await cubeQuery({
+    measures: ['GenreStats.totalRatings', 'GenreStats.movieCount'],
+    dimensions: ['GenreStats.genre', 'GenreStats.avgRating'],
+  });
+
+  makeChart('chart-genre-scatter', {
+    type: 'bubble',
+    data: {
+      datasets: genreScatter.map((d, i) => ({
+        label: d['GenreStats.genre'],
+        data: [{ x: +d['GenreStats.avgRating'], y: +d['GenreStats.totalRatings'], r: Math.sqrt(+d['GenreStats.movieCount']) * 1.5 }],
+        backgroundColor: COLORS[i % COLORS.length] + '88',
+        borderColor: COLORS[i % COLORS.length],
+      })),
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      scales: {
+        x: { title: { display: true, text: 'Avg Rating' }, min: 2.5, max: 4.5 },
+        y: { title: { display: true, text: 'Total Ratings' } },
+      },
+      plugins: { legend: { position: 'right', labels: { boxWidth: 10, font: { size: 11 } } } },
+    },
+  });
+}
+
+// ── Genres ─────────────────────────────────────────────────────────────
+async function loadGenres() {
+  const data = await cubeQuery({
+    measures: ['GenreStats.totalRatings', 'GenreStats.movieCount', 'GenreStats.uniqueRaters'],
+    dimensions: ['GenreStats.genre', 'GenreStats.avgRating'],
+    order: { 'GenreStats.totalRatings': 'desc' },
+  });
+
+  makeChart('chart-genre-movies', {
+    type: 'doughnut',
+    data: {
+      labels: data.map(d => d['GenreStats.genre']),
+      datasets: [{ data: data.map(d => +d['GenreStats.movieCount']), backgroundColor: COLORS }],
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { position: 'right', labels: { boxWidth: 12, font: { size: 11 } } } },
+    },
+  });
+
+  makeChart('chart-genre-avg', {
+    type: 'bar',
+    data: {
+      labels: data.map(d => d['GenreStats.genre']),
+      datasets: [{
+        label: 'Avg Rating', data: data.map(d => +d['GenreStats.avgRating']),
+        backgroundColor: data.map(d => +d['GenreStats.avgRating'] >= 3.5 ? '#4ade8099' : '#fbbf2499'),
+        borderColor: data.map(d => +d['GenreStats.avgRating'] >= 3.5 ? '#4ade80' : '#fbbf24'),
+        borderWidth: 1, borderRadius: 4,
+      }],
+    },
+    options: {
+      indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: { x: { min: 2.5, max: 4.5 } },
+    },
+  });
+
+  // Table
+  const maxRatings = Math.max(...data.map(d => +d['GenreStats.totalRatings']));
+  document.getElementById('genre-table').innerHTML = `<table>
+    <tr><th>Genre</th><th>Avg Rating</th><th>Total Ratings</th><th>Movies</th><th>Unique Raters</th><th></th></tr>
+    ${data.map(d => {
+      const pct = (+d['GenreStats.totalRatings'] / maxRatings * 100).toFixed(0);
+      return `<tr>
+        <td><strong>${d['GenreStats.genre']}</strong></td>
+        <td>${(+d['GenreStats.avgRating']).toFixed(2)}</td>
+        <td>${Number(d['GenreStats.totalRatings']).toLocaleString()}</td>
+        <td>${Number(d['GenreStats.movieCount']).toLocaleString()}</td>
+        <td>${Number(d['GenreStats.uniqueRaters']).toLocaleString()}</td>
+        <td><span class="rating-bar" style="width:${pct}px"></span></td>
+      </tr>`;
+    }).join('')}
+  </table>`;
+}
+
+// ── Movies ─────────────────────────────────────────────────────────────
+async function loadMovies() {
+  const sortBy = document.getElementById('movie-sort').value;
+  const minRatings = +document.getElementById('movie-min-ratings').value || 50;
+
+  const data = await cubeQuery({
+    measures: ['MovieStats.totalRatings', 'MovieStats.uniqueRaters'],
+    dimensions: ['MovieStats.title', 'MovieStats.releaseYear', 'MovieStats.genres', 'MovieStats.avgRatingDim'],
+    order: { [`MovieStats.${sortBy}`]: 'desc' },
+    limit: 50,
+    filters: [{ dimension: 'MovieStats.totalRatings', operator: 'gte', values: [String(minRatings)] }],
+  });
+
+  const top20 = data.slice(0, 20);
+
+  makeChart('chart-movie-bar', {
+    type: 'bar',
+    data: {
+      labels: top20.map(d => d['MovieStats.title'].length > 25 ? d['MovieStats.title'].slice(0,25)+'...' : d['MovieStats.title']),
+      datasets: [{
+        label: sortBy === 'avgRating' ? 'Avg Rating' : 'Total Ratings',
+        data: top20.map(d => sortBy === 'avgRating' ? +d['MovieStats.avgRatingDim'] : +d['MovieStats.totalRatings']),
+        backgroundColor: '#38bdf899', borderColor: '#38bdf8', borderWidth: 1, borderRadius: 4,
+      }],
+    },
+    options: {
+      indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+    },
+  });
+
+  makeChart('chart-movie-scatter', {
+    type: 'scatter',
+    data: {
+      datasets: [{
+        label: 'Movies',
+        data: data.map(d => ({ x: +d['MovieStats.totalRatings'], y: +d['MovieStats.avgRatingDim'] })),
+        backgroundColor: '#38bdf844', borderColor: '#38bdf8', pointRadius: 4,
+      }],
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      scales: {
+        x: { title: { display: true, text: 'Total Ratings (popularity)' }, type: 'logarithmic' },
+        y: { title: { display: true, text: 'Avg Rating (quality)' }, min: 0, max: 5 },
+      },
+      plugins: { legend: { display: false } },
+    },
+  });
+
+  // Table
+  document.getElementById('movie-table').innerHTML = `<table>
+    <tr><th>#</th><th>Title</th><th>Year</th><th>Genres</th><th>Avg Rating</th><th>Ratings</th></tr>
+    ${data.map((d, i) => `<tr>
+      <td>${i+1}</td>
+      <td><strong>${d['MovieStats.title']}</strong></td>
+      <td>${d['MovieStats.releaseYear'] || '-'}</td>
+      <td style="font-size:12px;color:var(--muted)">${d['MovieStats.genres']}</td>
+      <td>${(+d['MovieStats.avgRatingDim']).toFixed(2)}</td>
+      <td>${Number(d['MovieStats.totalRatings']).toLocaleString()}</td>
+    </tr>`).join('')}
+  </table>`;
+}
+
+// ── Users ──────────────────────────────────────────────────────────────
+async function loadUsers() {
+  // Top 30 active users
+  const topUsers = await cubeQuery({
+    measures: ['UserStats.totalRatings', 'UserStats.moviesRated'],
+    dimensions: ['UserStats.userId', 'UserStats.avgRatingDim'],
+    order: { 'UserStats.totalRatings': 'desc' },
+    limit: 30,
+  });
+
+  // Histogram: bucket users by rating count
+  const allUsers = await cubeQuery({
+    measures: ['UserStats.totalRatings'],
+    dimensions: ['UserStats.userId'],
+    order: { 'UserStats.totalRatings': 'desc' },
+    limit: 610,
+  });
+
+  const buckets = [
+    { label: '1-20', min: 1, max: 20 },
+    { label: '21-50', min: 21, max: 50 },
+    { label: '51-100', min: 51, max: 100 },
+    { label: '101-200', min: 101, max: 200 },
+    { label: '201-500', min: 201, max: 500 },
+    { label: '500+', min: 501, max: 99999 },
+  ];
+  const bucketCounts = buckets.map(b =>
+    allUsers.filter(u => { const n = +u['UserStats.totalRatings']; return n >= b.min && n <= b.max; }).length
+  );
+
+  makeChart('chart-user-hist', {
+    type: 'bar',
+    data: {
+      labels: buckets.map(b => b.label),
+      datasets: [{ label: 'Users', data: bucketCounts, backgroundColor: '#a78bfa99', borderColor: '#a78bfa', borderWidth: 1, borderRadius: 4 }],
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { title: { display: true, text: 'Ratings per user' } },
+        y: { title: { display: true, text: 'Number of users' } },
+      },
+    },
+  });
+
+  makeChart('chart-user-scatter', {
+    type: 'scatter',
+    data: {
+      datasets: [{
+        label: 'Users',
+        data: topUsers.map(u => ({ x: +u['UserStats.totalRatings'], y: +u['UserStats.avgRatingDim'] })),
+        backgroundColor: '#4ade8044', borderColor: '#4ade80', pointRadius: 5,
+      }],
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      scales: {
+        x: { title: { display: true, text: 'Total Ratings' } },
+        y: { title: { display: true, text: 'Avg Rating Given' }, min: 0, max: 5 },
+      },
+      plugins: { legend: { display: false } },
+    },
+  });
+
+  document.getElementById('user-table').innerHTML = `<table>
+    <tr><th>#</th><th>User ID</th><th>Total Ratings</th><th>Movies Rated</th><th>Avg Rating</th></tr>
+    ${topUsers.map((u, i) => `<tr>
+      <td>${i+1}</td>
+      <td>${u['UserStats.userId']}</td>
+      <td>${Number(u['UserStats.totalRatings']).toLocaleString()}</td>
+      <td>${Number(u['UserStats.moviesRated']).toLocaleString()}</td>
+      <td>${(+u['UserStats.avgRatingDim']).toFixed(2)}</td>
+    </tr>`).join('')}
+  </table>`;
+}
+
+// ── Init ──────────────────────────────────────────────────────────────
+async function init() {
+  const status = document.getElementById('conn-status');
+  try {
+    const res = await fetch(`${API}/meta`);
+    if (!res.ok) throw new Error();
+    status.textContent = 'Connected (silver)';
+    status.className = 'status ok';
+  } catch {
+    status.textContent = 'Disconnected';
+    status.className = 'status err';
+    document.querySelector('main').innerHTML = `
+      <div class="loading">
+        <p>Cube.js API unreachable at ${API}</p>
+        <p style="margin-top:8px;font-size:13px;color:var(--muted)">Run: <code>bash tools/cube-bi.sh</code></p>
+      </div>`;
+    return;
+  }
+
+  await loadOverview();
+  loadGenres();
+  loadMovies();
+  loadUsers();
+}
+
+init();
+</script>
+</body>
+</html>

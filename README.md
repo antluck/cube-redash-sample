@@ -40,19 +40,15 @@ docker compose up --build
 | Service | URL | Description |
 |---------|-----|-------------|
 | Cube.js Playground | http://localhost:4000 | セマンティックレイヤー API + Playground |
+| Cube SQL API | localhost:15432 | PostgreSQL wire protocol (セマンティクス経由) |
 | BI Dashboard | http://localhost:8080 | Chart.js ダッシュボード |
 | AI Consultant | http://localhost:8787 | NL→SQL + データ分析 API |
 | DuckDB Server | localhost:5433 | PostgreSQL wire protocol |
+| Redash | http://localhost:5050 | BI ダッシュボード (クエリエディタ) |
 
-### Redash (optional)
+### Redash セットアップ
 
-Redash は重いので別プロファイルで起動する:
-
-```bash
-docker compose --profile redash up -d
-```
-
-初回のみ Redash のセットアップが必要:
+`docker compose up` で Redash も一緒に起動する。初回のみセットアップが必要:
 
 ```bash
 # 1. テーブル作成
@@ -60,8 +56,20 @@ docker compose exec redash python /app/manage.py database create_tables
 
 # 2. ブラウザで http://localhost:5050 を開き、管理者アカウントを作成
 
-# 3. Data Source を追加:
+# 3. Data Source を追加 (2つ):
+
+#  ── (A) Cube SQL API (セマンティクスレイヤー経由・推奨) ──
 #    Type: PostgreSQL
+#    Name: Cube (Semantic Layer)
+#    Host: cube
+#    Port: 15432
+#    User: cube
+#    Password: cube-analytics-dev   ← CUBEJS_API_SECRET の値
+#    Database Name: db
+
+#  ── (B) DuckDB 直接接続 (セマンティクスなし) ──
+#    Type: PostgreSQL
+#    Name: DuckDB (Direct)
 #    Host: duckdb-server
 #    Port: 5433
 #    User: (空)

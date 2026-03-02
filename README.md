@@ -24,11 +24,11 @@ MovieLens CSV ──→ DuckDB ──→ dbt marts ──→ Cube.js (semantic l
 git clone https://github.com/antluck/cube-redash-sample.git
 cd cube-analytics
 
-# 2. Set API key (required for AI features)
-cp .env.example .env
-# Edit .env and set ANTHROPIC_API_KEY
+# 2. Set Claude OAuth token (required for AI features)
+#    Claude Max/Pro プランでログイン済みの場合:
+./scripts/refresh-token.sh
 
-# 3. Start core services
+# 3. Start all services
 docker compose up --build
 ```
 

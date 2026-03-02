@@ -473,12 +473,12 @@
     const sql = getRedashSQL();
     const data = captureRedashResults();
 
-    if (!data || !data.rows.length) {
-      body.innerHTML = '<div class="ai-status">結果テーブルが見つかりません。先にクエリを実行してください。</div>';
+    if (!sql || sql.trim().length < 10) {
+      body.innerHTML = '<div class="ai-status">クエリが見つかりません。Redash エディタに SQL を入力してください。</div>';
       return;
     }
 
-    const cacheKey = await hashPayload(sql, data.columns, data.rows);
+    const cacheKey = await hashString(sql);
     const cached = _aiCache.get(cacheKey);
     if (cached) {
       renderAnalysis(body, cached);
@@ -488,7 +488,7 @@
     body.innerHTML = `
       <div class="ai-streaming">
         <div class="ai-spinner"></div>
-        <span>Claude が分析中...</span>
+        <span>Claude が分析中（Cube からデータ取得→分析）...</span>
       </div>
       <details class="ai-thinking-details">
         <summary class="ai-thinking-toggle">Thinking</summary>
@@ -496,11 +496,21 @@
       </details>
       <div class="ai-partial"></div>`;
 
+    let cubeQuery = null;
+    try { cubeQuery = await sqlToCubeQuery(sql); } catch (_) {}
+
+    const payload = { query: sql };
+    if (cubeQuery) payload.cube_query = cubeQuery;
+    if (data && data.rows.length) {
+      payload.columns = data.columns;
+      payload.rows = data.rows;
+    }
+
     try {
       const res = await fetch(`${AI_API}/analyze`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query: sql || '(unknown)', columns: data.columns, rows: data.rows }),
+        body: JSON.stringify(payload),
       });
 
       const reader = res.body.getReader();

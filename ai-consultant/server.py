@@ -45,11 +45,42 @@ app.add_middleware(
 )
 
 
+MAX_ROWS_FOR_ANALYSIS = 5000
+
+CUBE_API = os.environ.get("CUBE_API_URL", "http://localhost:4000/cubejs-api/v1")
+_cube_meta_cache: dict = {"data": None, "ts": 0.0}
+
+
 class AnalyzeRequest(BaseModel):
     query: str
-    columns: list[str]
-    rows: list[dict]
+    cube_query: dict | None = None
+    columns: list[str] | None = None
+    rows: list[dict] | None = None
     metadata: dict | None = None
+
+
+async def fetch_cube_data(
+    cube_query: dict,
+) -> tuple[list[str], list[dict]] | None:
+    """Execute a Cube JSON query via /load and return (columns, rows)."""
+    q = {**cube_query}
+    if "limit" not in q or q["limit"] > MAX_ROWS_FOR_ANALYSIS:
+        q["limit"] = MAX_ROWS_FOR_ANALYSIS
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.get(
+                f"{CUBE_API}/load",
+                params={"query": json.dumps(q)},
+            )
+            resp.raise_for_status()
+            data = resp.json()
+        rows_raw = data.get("data", [])
+        if not rows_raw:
+            return None
+        columns = list(rows_raw[0].keys())
+        return columns, rows_raw[:MAX_ROWS_FOR_ANALYSIS]
+    except Exception:
+        return None
 
 
 def format_as_markdown_table(columns: list[str], rows: list[dict]) -> str:
@@ -72,14 +103,38 @@ async def health():
 
 @app.post("/analyze")
 async def analyze(req: AnalyzeRequest):
-    total_rows = len(req.rows)
-    display_rows = req.rows[:200]
-    table = format_as_markdown_table(req.columns, display_rows)
+    columns = None
+    rows = None
+    data_source = "dom"
+
+    if req.cube_query:
+        result = await fetch_cube_data(req.cube_query)
+        if result:
+            columns, rows = result
+            data_source = "cube"
+
+    if not rows and req.columns and req.rows:
+        columns = req.columns
+        rows = req.rows
+
+    if not rows:
+        async def error_stream():
+            err = json.dumps(
+                {"type": "error", "message": "データを取得できませんでした。クエリを実行してから再度お試しください。"},
+                ensure_ascii=False,
+            )
+            yield f"data: {err}\n\n"
+        return StreamingResponse(error_stream(), media_type="text/event-stream")
+
+    total_rows = len(rows)
+    display_rows = rows[:MAX_ROWS_FOR_ANALYSIS]
+    table = format_as_markdown_table(columns, display_rows)
 
     truncation_note = ""
-    if total_rows > 200:
-        truncation_note = f"\n\n注意: 元データは{total_rows}行ですが、最初の200行を表示しています。"
+    if total_rows > MAX_ROWS_FOR_ANALYSIS:
+        truncation_note = f"\n\n注意: 元データは{total_rows}行ですが、最初の{MAX_ROWS_FOR_ANALYSIS}行を表示しています。"
 
+    source_label = "Cube API" if data_source == "cube" else "Redash DOM"
     user_prompt = f"""\
 以下のクエリ結果を分析してください。
 
@@ -88,7 +143,7 @@ async def analyze(req: AnalyzeRequest):
 {req.query}
 ```
 
-## データ（{total_rows}行）
+## データ（{total_rows}行, ソース: {source_label}）
 {table}{truncation_note}
 
 データを深く分析し、summary, insights, charts, actions を返してください。"""
@@ -146,9 +201,6 @@ async def analyze(req: AnalyzeRequest):
 
 
 # ── NL → Cube SQL ────────────────────────────────────────────────
-
-CUBE_API = os.environ.get("CUBE_API_URL", "http://localhost:4000/cubejs-api/v1")
-_cube_meta_cache: dict = {"data": None, "ts": 0.0}
 
 
 async def get_cube_meta() -> dict:

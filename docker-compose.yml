@@ -57,7 +57,8 @@ services:
       - "8787:8787"
     environment:
       CUBE_API_URL: http://cube:4000/cubejs-api/v1
-      CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
     depends_on:
       - cube
 

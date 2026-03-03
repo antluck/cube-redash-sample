@@ -24,10 +24,43 @@ MovieLens CSV ──→ DuckDB ──→ dbt marts ──→ Cube.js (semantic l
 git clone https://github.com/antluck/cube-redash-sample.git
 cd cube-analytics
 
-# 2. Set Claude OAuth token (required for AI features)
-#    Claude Max/Pro プランでログイン済みの場合:
-./scripts/refresh-token.sh
+# 2. Configure AI credentials (required for AI features)
+cp .env.example .env
+#    → .env を編集し、以下いずれかの方法でキーを設定:
+```
 
+### AI 認証の設定（いずれか 1 つ）
+
+| 方法 | OS | 必要なもの |
+|------|----|-----------|
+| **A. Anthropic API Key** | Any | [Anthropic Console](https://console.anthropic.com/) のAPIキー |
+| **B. `claude setup-token`** | Any | Claude Max/Pro サブスクリプション + Claude Code CLI |
+| **C. `refresh-token.sh`** | macOS / Linux | Claude Code でログイン済み |
+
+```bash
+# .env に記入
+ANTHROPIC_API_KEY=sk-ant-api03-...
+```
+
+**B. `claude setup-token`** — Claude Max/Pro サブスクリプション利用:
+
+```bash
+# Claude Code CLI でトークンを発行（ブラウザが開く）
+claude setup-token
+# 表示されたトークンを .env に記入
+CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-...
+```
+
+**C. `refresh-token.sh`** — ローカルの Claude Code 認証情報を自動抽出:
+
+```bash
+# macOS: Keychain から / Linux: ~/.claude/.credentials.json から取得
+./scripts/refresh-token.sh
+```
+
+---
+
+```bash
 # 3. Start all services
 docker compose up --build
 ```
@@ -130,7 +163,10 @@ cd duckdb-server && pip install duckdb buenavista && python3 serve.py
 
 # AI Consultant
 cd ai-consultant && pip install -r requirements.txt
-ANTHROPIC_API_KEY=sk-... uvicorn server:app --host 127.0.0.1 --port 8787
+# API Key の場合:
+ANTHROPIC_API_KEY=sk-ant-api03-... uvicorn server:app --host 127.0.0.1 --port 8787
+# OAuth Token の場合:
+# CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-... uvicorn server:app --host 127.0.0.1 --port 8787
 ```
 
 ## Data
